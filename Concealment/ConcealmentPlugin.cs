@@ -4,11 +4,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Controls;
 using NLog;
-using Sandbox.Definitions;
 using Sandbox.Engine.Multiplayer;
 using Sandbox.Game.Entities;
 using Sandbox.Game.Entities.Cube;
@@ -23,12 +23,11 @@ using Torch.API.Plugins;
 using Torch.API.Session;
 using Torch.Collections;
 using Torch.Managers;
-using Torch.Session;
 using VRage.Game;
 using VRage.Game.Components;
-using VRage.Game.Definitions;
+using VRage.Game.Components.Session;
+using VRage.Game.Entity;
 using VRage.Game.ModAPI;
-using VRage.Game.ObjectBuilders.ComponentSystem;
 using VRage.ModAPI;
 using VRageMath;
 
@@ -114,14 +113,14 @@ namespace Concealment
 
             delayTimer.Elapsed += (sender, args) => _ready = true;
             delayTimer.Start();
-            
+
             if (Settings.Data.RCKeepAliveAction)
             {
                 var keepAliveAction = MyAPIGateway.TerminalControls.CreateAction<IMyRemoteControl>("Concealment.KeepAlive");
                 keepAliveAction.Action = KeepAlive;
                 MyAPIGateway.TerminalControls.AddAction<IMyRemoteControl>(keepAliveAction);
             }
-            
+
             MyMultiplayer.Static.ClientJoined += RevealCryoPod;
 
             _init = true;
@@ -176,13 +175,16 @@ namespace Concealment
             Torch.Invoke(() =>
             {
                 Log.Debug(nameof(RevealCryoPod));
+
+                var componentUpdater = MySession.Static?.GetComponent<MyEntityComponentUpdater>();
+
                 for (var i = ConcealedGroups.Count - 1; i >= 0; i--)
                 {
                     var group = ConcealedGroups[i];
 
                     if (group.IsCryoOccupied(steamId))
                     {
-                        RevealGroup(group);
+                        RevealGroup(group, componentUpdater);
                         return;
                     }
                 }
@@ -194,28 +196,33 @@ namespace Concealment
             Torch.Invoke(() =>
             {
                 Log.Debug(nameof(RevealSpawns));
+
                 var identityId = MySession.Static.Players.TryGetIdentityId(args.PlayerId.SteamId);
+
                 if (identityId == 0)
                     return;
+
+                var componentUpdater = MySession.Static?.GetComponent<MyEntityComponentUpdater>();
 
                 for (var i = ConcealedGroups.Count - 1; i >= 0; i--)
                 {
                     var group = ConcealedGroups[i];
 
                     if (group.IsMedicalRoomAvailable(identityId))
-                        RevealGroup(group);
+                        RevealGroup(group, componentUpdater);
                 }
             });
         }
 
-
-        private int ConcealGroup(ConcealGroup group)
+        private int ConcealGroup(ConcealGroup group, Action<MyEntity> removeUpdatingComponents)
         {
             if (ConcealedGroups.Any(g => g.Id == group.Id))
                 return 0;
 
             Log.Debug($"Concealing grids: {group.GridNames}");
-            group.Conceal();
+
+            group.Conceal(removeUpdatingComponents);
+
             /*foreach (var entity in group.Grids)
                 entity.GetStorage().SetValue(Id, "True");*/
 
@@ -239,6 +246,19 @@ namespace Concealment
 
         public int RevealGroup(ConcealGroup group)
         {
+            return RevealGroup(group, MySession.Static?.GetComponent<MyEntityComponentUpdater>());
+        }
+
+        public void RevealGroups(IEnumerable<ConcealGroup> groups)
+        {
+            var componentUpdater = MySession.Static?.GetComponent<MyEntityComponentUpdater>();
+
+            foreach (var group in groups)
+                RevealGroup(group, componentUpdater);
+        }
+
+        private int RevealGroup(ConcealGroup group, MyEntityComponentUpdater componentUpdater)
+        {
             if (!group.IsConcealed)
             {
                 Log.Warn($"Attempted to reveal a group that wasn't concealed: {group.GridNames}");
@@ -248,7 +268,9 @@ namespace Concealment
 
             var count = group.Grids.Count;
             Log.Debug($"Revealing grids: {group.GridNames}");
-            group.Reveal();
+
+            group.Reveal(componentUpdater);
+
             /*foreach (var entity in group.Grids)
                 entity.GetStorage().SetValue(Id, "False");*/
 
@@ -260,11 +282,18 @@ namespace Concealment
 
         public int RevealGridsInSphere(BoundingSphereD sphere)
         {
+            return RevealGridsInSphere(sphere, MySession.Static?.GetComponent<MyEntityComponentUpdater>());
+        }
+
+        private int RevealGridsInSphere(BoundingSphereD sphere, MyEntityComponentUpdater componentUpdater)
+        {
             var revealed = 0;
             _concealedAabbTree.OverlapAllBoundingSphere(ref sphere, _intersectGroups);
+
             Log.Trace($"{_intersectGroups.Count} groups");
+
             foreach (var group in _intersectGroups)
-                revealed += RevealGroup(group);
+                revealed += RevealGroup(group, componentUpdater);
 
             _intersectGroups.Clear();
             return revealed;
@@ -272,12 +301,15 @@ namespace Concealment
 
         public int RevealGrids(double distanceFromPlayers)
         {
+            var componentUpdater = MySession.Static?.GetComponent<MyEntityComponentUpdater>();
+
             var revealed = 0;
             var playerSpheres = GetPlayerViewSpheres(distanceFromPlayers);
+
             foreach (var sphere in playerSpheres)
             {
                 Log.Trace($"{sphere.Center}: {sphere.Radius}");
-                revealed += RevealGridsInSphere(sphere);
+                revealed += RevealGridsInSphere(sphere, componentUpdater);
             }
 
             if (_settingsChanged)
@@ -285,7 +317,7 @@ namespace Concealment
                 for (var i = ConcealedGroups.Count - 1; i >= 0; i--)
                 {
                     if (IsExcluded(ConcealedGroups[i]))
-                        revealed += RevealGroup(ConcealedGroups[i]);
+                        revealed += RevealGroup(ConcealedGroups[i], componentUpdater);
                 }
 
                 _settingsChanged = false;
@@ -293,17 +325,19 @@ namespace Concealment
 
             if (revealed != 0)
                 Log.Info($"Revealed {revealed} grids near players.");
+
             return revealed;
         }
 
         public int ConcealGrids(double distanceFromPlayers = 0)
         {
             Log.Debug("Concealing grids");
+
             int concealed = 0;
             var playerSpheres = GetPlayerViewSpheres(distanceFromPlayers);
-
-            ConcurrentBag<ConcealGroup> groups = new ConcurrentBag<ConcealGroup>();
+            var groups = new ConcurrentBag<ConcealGroup>();
             var sw = Stopwatch.StartNew();
+
             Parallel.ForEach(MyCubeGridGroups.Static.Physical.Groups, group =>
             {
                 var concealGroup = new ConcealGroup(group);
@@ -326,19 +360,23 @@ namespace Concealment
 
                 groups.Add(concealGroup);
             });
+
             Log.Debug($"Scanned grids in {sw.ElapsedMilliseconds}ms.");
             sw.Restart();
 
+            var removeUpdatingComponents = Extensions.GetRemoveUpdatingComponentsAction(MySession.Static);
+
             foreach (var group in groups)
             {
-                concealed += ConcealGroup(group);
+                concealed += ConcealGroup(group, removeUpdatingComponents);
             }
+
             Log.Debug($"Concealed grids in {sw.ElapsedMilliseconds}ms.");
             sw.Stop();
 
             var concealedCount = ConcealedGroups.SelectMany(x => x.Grids).Count();
             var totalCount = MyEntities.GetEntities().Count(x => x is MyCubeGrid);
-            
+
             if (concealed > 0)
                 Log.Info($"{concealedCount+concealed}/{totalCount} grids are concealed ({(concealedCount+concealed)/(float)totalCount:P}), {concealed} new.");
 
@@ -371,21 +409,21 @@ namespace Concealment
                     if (block == null)
                         continue;
 
-					if (block is MyRefinery r && !Settings.Data.ConcealProduction && !r.InputInventory.Empty() && r.IsFunctional && r.Enabled)
-					{
-						Log.Debug($"{group.GridNames} exempted refinery ({r.CustomName} active)");
-						exclude = true;
-						break;
-					}
+                    if (block is MyRefinery r && !Settings.Data.ConcealProduction && !r.InputInventory.Empty() && r.IsFunctional && r.Enabled)
+                    {
+                        Log.Debug($"{group.GridNames} exempted refinery ({r.CustomName} active)");
+                        exclude = true;
+                        break;
+                    }
 
-					if (block is MyProductionBlock p && !Settings.Data.ConcealProduction && p.IsProducing)
-					{
-						Log.Debug($"{group.GridNames} exempted production ({p.CustomName} active)");
-						exclude = true;
-						break;
-					}
+                    if (block is MyProductionBlock p && !Settings.Data.ConcealProduction && p.IsProducing)
+                    {
+                        Log.Debug($"{group.GridNames} exempted production ({p.CustomName} active)");
+                        exclude = true;
+                        break;
+                    }
 
-					if (Settings.Data.ExcludedSubtypes.Contains(block.BlockDefinition.Id.SubtypeName))
+                    if (Settings.Data.ExcludedSubtypes.Contains(block.BlockDefinition.Id.SubtypeName))
                     {
                         Log.Debug($"{group.GridNames} exempted subtype {block.BlockDefinition.Id.SubtypeName}");
                         exclude = true;
@@ -401,9 +439,11 @@ namespace Concealment
         {
             Log.Debug("Revealing all grids");
 
-            var revealed = 0;
+            var componentUpdater = MySession.Static?.GetComponent<MyEntityComponentUpdater>();
+            int revealed = 0;
+
             for (var i = ConcealedGroups.Count - 1; i >= 0; i--)
-                revealed += RevealGroup(ConcealedGroups[i]);
+                revealed += RevealGroup(ConcealedGroups[i], componentUpdater);
 
             return revealed;
         }
@@ -419,6 +459,27 @@ namespace Concealment
         public static MyModStorageComponentBase GetStorage(this IMyEntity entity)
         {
             return entity.Storage = entity.Storage ?? new MyModStorageComponent();
+        }
+
+        private static MethodInfo OnEntityClosingMethod = typeof(MyEntityComponentUpdater)
+            .GetMethod("OnEntityClosing", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(MyEntity) }, null);
+
+        private static Action<MyEntity> OnEntityClosingAction;
+
+        public static Action<MyEntity> GetRemoveUpdatingComponentsAction(MySession session)
+        {
+            if (session == null)
+            {
+                OnEntityClosingAction = null;
+                return null;
+            }
+
+            var componentUpdater = session.GetComponent<MyEntityComponentUpdater>();
+
+            if (OnEntityClosingAction == null || OnEntityClosingAction.Target != componentUpdater)
+                OnEntityClosingAction = (Action<MyEntity>)OnEntityClosingMethod.CreateDelegate(typeof(Action<MyEntity>), componentUpdater);
+
+            return OnEntityClosingAction;
         }
     }
 }

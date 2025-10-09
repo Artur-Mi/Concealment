@@ -25,14 +25,15 @@ namespace Concealment
         {
             var groups = Concealed.SelectedItems.Cast<ConcealGroup>().ToList();
             Concealed.SelectedItems.Clear();
+
             if (!groups.Any())
                 return;
 
             var p = Plugin;
-            Plugin.Torch.InvokeBlocking(delegate
+
+            p.Torch.InvokeBlocking(delegate
             {
-                foreach (var current in groups)
-                    p.RevealGroup(current);
+                p.RevealGroups(groups);
             });
         }
 
