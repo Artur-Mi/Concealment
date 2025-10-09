@@ -2,14 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using Havok;
 using NLog;
-using Sandbox.Engine.Physics;
 using Sandbox.Game.Entities;
 using Sandbox.Game.Entities.Blocks;
 using Sandbox.Game.World;
 using SpaceEngineers.Game.Entities.Blocks;
-using VRage.Audio;
+using VRage.Game.Components.Session;
 using VRage.Game.Entity;
 using VRage.Game.Entity.EntityComponents.Interfaces;
 using VRage.Groups;
@@ -131,6 +129,7 @@ namespace Concealment
         }
 
         private readonly HashSet<long> _projectors = new HashSet<long>();
+
         private void DisableProjectors(MyCubeGrid grid)
         {
             foreach (var projector in grid.GetFatBlocks<MyProjectorBase>())
@@ -149,7 +148,7 @@ namespace Concealment
             {
                 if (projector == null)
                     continue;
-                
+
                 projector.Enabled = true;
             }
             _projectors.Clear();
@@ -160,22 +159,31 @@ namespace Concealment
         /// </summary>
         public void Conceal()
         {
+            var removeUpdatingComponents = Extensions.GetRemoveUpdatingComponentsAction(MySession.Static);
+
+            Conceal(removeUpdatingComponents);
+        }
+
+        internal void Conceal(Action<MyEntity> removeUpdatingComponents)
+        {
             foreach (var grid in Grids)
             {
                 DisableProjectors(grid);
-                
+
                 if (grid.Parent == null)
-                    UnregisterRecursive(grid);   
+                    UnregisterRecursive(grid);
             }
 
             void UnregisterRecursive(MyEntity e)
             {
                 if (e.IsPreview)
                     return;
-                
+
+                removeUpdatingComponents?.Invoke(e);
                 MyEntities.UnregisterForUpdate(e);
                 (e.GameLogic as IMyGameLogicComponent)?.UnregisterForUpdate();
                 e.Flags |= (EntityFlags)4;
+
                 if (e.Hierarchy == null)
                     return;
 
@@ -189,22 +197,31 @@ namespace Concealment
         /// </summary>
         public void Reveal()
         {
+            var componentUpdater = MySession.Static?.GetComponent<MyEntityComponentUpdater>();
+
+            Reveal(componentUpdater);
+        }
+
+        internal void Reveal(MyEntityComponentUpdater componentUpdater)
+        {
             foreach (var grid in Grids)
             {
                 if (grid.Parent == null)
-                    RegisterRecursive(grid);   
+                    RegisterRecursive(grid);
             }
-            
+
             EnableProjectors();
 
             void RegisterRecursive(MyEntity e)
             {
                 if (e.IsPreview)
                     return;
-                
+
+                componentUpdater?.AddEntityComponents(e);
                 MyEntities.RegisterForUpdate(e);
                 (e.GameLogic as IMyGameLogicComponent)?.RegisterForUpdate();
                 e.Flags &= ~(EntityFlags)4;
+
                 if (e.Hierarchy == null)
                     return;
 
@@ -213,5 +230,4 @@ namespace Concealment
             }
         }
     }
-
 }
