@@ -17,6 +17,7 @@ namespace Concealment
     public class Settings : ViewModel
     {
         private bool _enabled = true;
+        private bool _concealInMovement;
         private double _concealDistance = 75000;
         private int _concealInterval = 3600;
         private double _revealDistance = 50000;
@@ -193,6 +194,16 @@ namespace Concealment
             set
             {
                 _enabled = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public bool ConcealInMovement
+        {
+            get => _concealInMovement;
+            set
+            {
+                _concealInMovement = value;
                 OnPropertyChanged();
             }
         }
