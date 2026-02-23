@@ -17,6 +17,7 @@
         <StackPanel Grid.Row="0">
             <StackPanel DataContext="{Binding Settings.Data}">
                 <CheckBox Content="Enable Concealment" Margin="3" IsChecked="{Binding Enabled}" />
+                <CheckBox Content="Conceal Grids In Movement (above 20m/s)" Margin="3" IsChecked="{Binding ConcealInMovement}" />
                 <CheckBox Content="Conceal Production" ToolTip="Conceal grids with active production blocks." Margin="3" IsChecked="{Binding ConcealProduction}" />
                 <CheckBox Content="Conceal Pirates" ToolTip="Conceal grids owned by Space Pirates." Margin="3" IsChecked="{Binding ConcealPirates}" />
                 <CheckBox Content="RC Keep Alive Action" ToolTip="Adds a toolbar action to remote control blocks to allow players to forcefully keep a grid from being concealed using a PB or Timer." Margin="3" IsChecked="{Binding RCKeepAliveAction}" />

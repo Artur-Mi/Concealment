@@ -95,7 +95,7 @@ namespace Concealment
             if (_ready)
             {
                 if (_counter % (ulong)Settings.Data.ConcealInterval == 0)
-                    ConcealGrids(Settings.Data.ConcealDistance);
+                    ConcealGrids(Settings.Data.ConcealDistance, Settings.Data.ConcealInMovement);
                 if (_counter % (ulong)Settings.Data.RevealInterval == 0)
                     RevealGrids(Settings.Data.RevealDistance);
                 _counter += 1;
@@ -329,7 +329,7 @@ namespace Concealment
             return revealed;
         }
 
-        public int ConcealGrids(double distanceFromPlayers = 0)
+        public int ConcealGrids(double distanceFromPlayers = 0, bool concealInMovement = false)
         {
             Log.Debug("Concealing grids");
 
@@ -341,6 +341,25 @@ namespace Concealment
             Parallel.ForEach(MyCubeGridGroups.Static.Physical.Groups, group =>
             {
                 var concealGroup = new ConcealGroup(group);
+
+                if (!concealInMovement)
+                {
+                    var isInMovement = false;
+                    foreach (var grid in group.Nodes)
+                    {
+                        if (grid?.NodeData?.Speed > 20f)
+                        {
+                            isInMovement = true;
+                            break;
+                        }
+                    }
+
+                    if (isInMovement)
+                    {
+                        Log.Trace("group in movement");
+                        return;
+                    }
+                }
 
                 if (distanceFromPlayers != 0)
                 {
