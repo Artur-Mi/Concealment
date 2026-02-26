@@ -95,7 +95,7 @@ namespace Concealment
             if (_ready)
             {
                 if (_counter % (ulong)Settings.Data.ConcealInterval == 0)
-                    ConcealGrids(Settings.Data.ConcealDistance, Settings.Data.ConcealInMovement);
+                    ConcealGrids(Settings.Data.ConcealDistance);
                 if (_counter % (ulong)Settings.Data.RevealInterval == 0)
                     RevealGrids(Settings.Data.RevealDistance);
                 _counter += 1;
@@ -329,7 +329,7 @@ namespace Concealment
             return revealed;
         }
 
-        public int ConcealGrids(double distanceFromPlayers = 0, bool concealInMovement = false)
+        public int ConcealGrids(double distanceFromPlayers = 0)
         {
             Log.Debug("Concealing grids");
 
@@ -340,26 +340,7 @@ namespace Concealment
 
             Parallel.ForEach(MyCubeGridGroups.Static.Physical.Groups, group =>
             {
-                var concealGroup = new ConcealGroup(group);
-
-                if (!concealInMovement)
-                {
-                    var isInMovement = false;
-                    foreach (var grid in group.Nodes)
-                    {
-                        if (grid?.NodeData?.Speed > 20f)
-                        {
-                            isInMovement = true;
-                            break;
-                        }
-                    }
-
-                    if (isInMovement)
-                    {
-                        Log.Trace("group in movement");
-                        return;
-                    }
-                }
+                var concealGroup = new ConcealGroup(group); 
 
                 if (distanceFromPlayers != 0)
                 {
@@ -407,6 +388,15 @@ namespace Concealment
             var pirateId = MyPirateAntennas.GetPiratesId();
             foreach (var grid in group.Grids)
             {
+                if (!Settings.Data.ConcealInMovement)
+                {
+                    if (grid.Speed > 20f)
+                    {
+                        Log.Debug($"{group.GridNames} is kept alive because it's in movement");
+                        return true;
+                    }
+                }
+
                 if (_keepAliveTimers.ContainsKey(grid.EntityId))
                 {
                     Log.Debug($"{group.GridNames} is kept alive by PB action");
